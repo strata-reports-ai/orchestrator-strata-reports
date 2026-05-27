@@ -1,0 +1,26 @@
+name: "Orchestrator"
+on:
+  workflow_dispatch:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: '*/5 * * * *'
+jobs:
+  dispatch-tasks:
+    if: github.event_name != 'issues' || github.event.label.name == 'ready' || github.event.label.name == 'done' || github.event.label.name == 'in-test'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: orchestrator
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Process ready tasks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
+          ORCHESTRATOR_REPO: ${{ github.repository }}
+          TRIGGER_EVENT: ${{ github.event_name }}
+        run: bash scripts/dispatch-tasks.sh
