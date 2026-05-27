@@ -221,7 +221,7 @@ Resume instructions:
 4. Review acceptance criteria and complete any remaining items.
 5. Run the build command again to verify.
 6. Open a pull request targeting the main branch.
-7. PR title: ${title}. PR body must include: Closes ${ORCHESTRATOR_REPO}#${number}
+7. PR title: ${title}. PR body must include: Implements ${ORCHESTRATOR_REPO}#${number}
 PROMPT
 
     jq -n --arg prompt "$prompt" --arg branch "$branch" \
@@ -472,7 +472,7 @@ Instructions:
 4. Implement the task following all project conventions.
 5. Run: ${build_cmd}
 6. Open a pull request targeting main.
-7. PR title: ${title}. PR body must include: Closes ${ORCHESTRATOR_REPO}#${number}
+7. PR title: ${title}. PR body must include: Implements ${ORCHESTRATOR_REPO}#${number}
 PROMPT
 
   if [ "$is_failed" = "true" ]; then
