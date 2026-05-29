@@ -157,32 +157,37 @@ while IFS= read -r issue; do
     continue
   fi
 
-  # Check immediately for open PRs with "Merge blocked" — don't wait for stale threshold
-  open_pr=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
-    --repo "${owner}/${target_repo}" --state open \
-    --json number,body \
-    --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${number}\"))] | .[0]" \
-    2>/dev/null || echo "")
-  if [ -n "$open_pr" ] && [ "$open_pr" != "null" ]; then
-    open_pr_number=$(echo "$open_pr" | jq -r '.number // empty' 2>/dev/null || true)
-    last_comment=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr view "$open_pr_number" \
-      --repo "${owner}/${target_repo}" --json comments \
-      --jq '.comments[-1].body[:60]' 2>/dev/null || echo "")
-    if echo "$last_comment" | grep -q "Merge blocked"; then
-      # Review passed but merge conflict — move to code-review for Guard 2b to rebase
-      gh issue edit "$number" --repo "$ORCHESTRATOR_REPO" \
-        --remove-label in-progress --add-label code-review 2>/dev/null || true
-      echo "Issue #$number: PR #$open_pr_number has merge conflict -- moved to code-review for rebase"
-      continue
-    fi
-  fi
-
-  age=$(( $(date +%s) - $(date -d "$updated_at" +%s) ))
+  # Check active runs first — only act on "Merge blocked" when no agent is working
   active_runs=$(GH_TOKEN="$DISPATCH_TOKEN" gh run list \
     --repo "${owner}/${target_repo}" \
     --workflow=claude-code.yml \
     --status in_progress \
     --json status --jq 'length' 2>/dev/null || echo "0")
+  open_pr=""
+  open_pr_number=""
+  last_comment=""
+  if [ "${active_runs:-0}" -eq 0 ]; then
+    open_pr=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
+      --repo "${owner}/${target_repo}" --state open \
+      --json number,body \
+      --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${number}\"))] | .[0]" \
+      2>/dev/null || echo "")
+    if [ -n "$open_pr" ] && [ "$open_pr" != "null" ]; then
+      open_pr_number=$(echo "$open_pr" | jq -r '.number // empty' 2>/dev/null || true)
+      last_comment=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr view "$open_pr_number" \
+        --repo "${owner}/${target_repo}" --json comments \
+        --jq '.comments[-1].body[:60]' 2>/dev/null || echo "")
+      if echo "$last_comment" | grep -q "Merge blocked"; then
+        # Review passed but merge conflict — move to code-review for Guard 2b to rebase
+        gh issue edit "$number" --repo "$ORCHESTRATOR_REPO" \
+          --remove-label in-progress --add-label code-review 2>/dev/null || true
+        echo "Issue #$number: PR #$open_pr_number has merge conflict -- moved to code-review for rebase"
+        continue
+      fi
+    fi
+  fi
+
+  age=$(( $(date +%s) - $(date -d "$updated_at" +%s) ))
   if [ "${active_runs:-0}" -eq 0 ]; then
     effective_threshold=900  # 15 min: no agent running, recover quickly
   else
@@ -198,7 +203,6 @@ while IFS= read -r issue; do
   if [ -n "$open_pr" ] && [ "$open_pr" != "null" ]; then
     echo "Issue #$number: open PR #$open_pr_number needs revision -- dispatching agent"
   fi
-
   retry_count=$(echo "$issue" | jq -r '[.labels[].name | select(startswith("retry-"))] | length')
   next_retry=$((retry_count + 1))
 
