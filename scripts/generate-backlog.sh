@@ -27,7 +27,7 @@ Where [repo-label] is one of:
 
 Body format:
   ## What to build
-  [2-3 sentences]
+  [2-3 sentences — describe the single, narrow deliverable]
 
   ## Acceptance criteria
   - [ ] [specific testable criterion]
@@ -39,6 +39,9 @@ Rules:
 - Follow build sequencing from section 16.1 strictly - do not skip ahead
 - Create exactly 3-5 issues
 - Make acceptance criteria detailed enough to implement without clarifying questions
+- SCOPE: Each issue must be small enough to implement in a single focused session — roughly one API endpoint, one UI component/page, or one migration script. If a PRD story would require more than 2-3 files or more than one logical unit of work, split it into multiple issues.
+- SPLIT EXAMPLES: "Password reset + account settings" → two issues: one for password reset endpoint, one for account settings endpoints. "Property CRUD" → split into create/update endpoint and list/delete endpoint if non-trivial.
+- AIM for issues that touch at most 2-4 files each.
 - End with: Done. Created N issues.
 PROMPT
 
