@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -50,6 +50,18 @@
       transition: background 0.15s;
     }
     .refresh-btn:hover { background: #21262d; }
+    .token-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .token-btn:hover { border-color: var(--green); color: var(--green); }
+    .token-btn.has-token { border-color: rgba(63,185,80,0.4); color: var(--green); }
     .agents-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -221,6 +233,7 @@
   </div>
   <div class="header-right">
     <span class="meta" id="countdown"></span>
+    <button class="token-btn" id="token-btn" onclick="setToken()" title="Set GitHub API token to avoid rate limits">🔑 Token</button>
     <button class="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
   </div>
 </header>
@@ -307,6 +320,36 @@
     return r.json();
   }
 
+  function updateTokenBtn() {
+    const btn = document.getElementById('token-btn');
+    if (!btn) return;
+    if (ghToken()) {
+      btn.classList.add('has-token');
+      btn.title = 'GitHub token set — click to update or clear';
+    } else {
+      btn.classList.remove('has-token');
+      btn.title = 'Set GitHub API token to avoid rate limits';
+    }
+  }
+
+  function setToken() {
+    const current = ghToken();
+    const val = prompt(
+      current
+        ? 'GitHub token is set. Enter a new token to replace it, or clear the field and click OK to remove it.'
+        : 'Paste your GitHub token (ghp_... or gho_...) to avoid the 60 req/hr rate limit.',
+      current || ''
+    );
+    if (val === null) return; // cancelled
+    if (val.trim() === '') {
+      localStorage.removeItem('gh_token');
+    } else {
+      localStorage.setItem('gh_token', val.trim());
+    }
+    updateTokenBtn();
+    doRefresh();
+  updateTokenBtn();
+  }
   function setBadge(id, status) {
     const el = document.getElementById(id);
     const cls = { running:'status-running', queued:'status-queued', idle:'status-idle' }[status] || 'status-idle';
@@ -456,6 +499,7 @@
   }
 
   doRefresh();
+  updateTokenBtn();
 </script>
 </body>
 </html>
