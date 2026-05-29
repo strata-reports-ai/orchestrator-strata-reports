@@ -166,7 +166,7 @@ while IFS= read -r issue; do
     --status in_progress \
     --json status --jq 'length' 2>/dev/null || echo "0")
   if [ "${active_runs:-0}" -eq 0 ]; then
-    effective_threshold=5400
+    effective_threshold=900  # 15 min: no agent running, recover quickly
   else
     effective_threshold="$STALE_THRESHOLD_SECONDS"
   fi
