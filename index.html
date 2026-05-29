@@ -278,17 +278,16 @@
     document.getElementById('countdown').textContent = '';
 
     try {
-      const [issues, fnRuns, webRuns] = await Promise.all([
+      const DB = 'strata-reports-ai/dbproj-strata-reports';
+      const [issues, devFn, devDb, devWeb, testRuns, revFn, revDb] = await Promise.all([
         get(`${GH}/repos/${ORCH}/issues?state=open&per_page=100`),
-        get(`${GH}/repos/${FN}/actions/runs?per_page=20`),
-        get(`${GH}/repos/${WEB}/actions/runs?per_page=20`),
+        get(`${GH}/repos/${FN}/actions/workflows/claude-code.yml/runs?per_page=5`),
+        get(`${GH}/repos/${DB}/actions/workflows/claude-code.yml/runs?per_page=5`),
+        get(`${GH}/repos/${WEB}/actions/workflows/claude-code.yml/runs?per_page=5`),
+        get(`${GH}/repos/${FN}/actions/workflows/test-agent.yml/runs?per_page=5`),
+        get(`${GH}/repos/${FN}/actions/workflows/code-review.yml/runs?per_page=5`),
+        get(`${GH}/repos/${DB}/actions/workflows/code-review.yml/runs?per_page=5`),
       ]);
-
-      const allRuns = [...(fnRuns.workflow_runs||[]), ...(webRuns.workflow_runs||[])];
-      const runsFor = path => ({ workflow_runs: allRuns.filter(r => r.path === path || r.path?.endsWith('/' + path)) });
-      const claudeRuns = runsFor('claude-code.yml');
-      const reviewRuns = runsFor('code-review.yml');
-      const testRuns   = runsFor('test-agent.yml');
 
       const buckets = { 'in-progress':[], 'code-review':[], 'in-test':[], 'cap-wait':[], 'ready':[], 'other':[] };
       const ORDER = ['in-progress','code-review','in-test','cap-wait','ready'];
@@ -299,14 +298,15 @@
       });
 
       const isActive = r => r.status === 'in_progress' || r.status === 'queued';
-      const activeClaudeRun = claudeRuns.workflow_runs?.find(isActive) ?? null;
-      const activeRevRun    = reviewRuns.workflow_runs?.find(isActive) ?? null;
-      const activeTestRun   = testRuns.workflow_runs?.find(isActive)   ?? null;
+      const allDevRuns = [...(devFn.workflow_runs||[]), ...(devDb.workflow_runs||[]), ...(devWeb.workflow_runs||[])];
+      const allRevRuns = [...(revFn.workflow_runs||[]), ...(revDb.workflow_runs||[])];
+      const activeDevRun  = allDevRuns.find(isActive) ?? null;
+      const activeTestRun = testRuns.workflow_runs?.find(isActive) ?? null;
+      const activeRevRun  = allRevRuns.find(isActive) ?? null;
 
       const hasInProgress  = buckets['in-progress'].length > 0;
       const hasCodeReview  = buckets['code-review'].length  > 0;
-      const activeDevRun   = (activeClaudeRun && hasInProgress)  ? activeClaudeRun : null;
-      const activeRevAgent = (activeClaudeRun && hasCodeReview)  ? activeClaudeRun : activeRevRun;
+      const activeRevAgent = activeRevRun ?? null;
 
       const devStatus = activeDevRun
         ? activeDevRun.status
@@ -323,8 +323,8 @@
       setBadge('tst-badge', tstStatus === 'in_progress' ? 'running' : tstStatus);
 
       renderAgentBody(document.getElementById('dev-body'), buckets['in-progress'], activeDevRun?.html_url);
-      renderAgentBody(document.getElementById('rev-body'), buckets['code-review'],  activeRevAgent?.html_url);
-      renderAgentBody(document.getElementById('tst-body'), buckets['in-test'],      activeTestRun?.html_url);
+      renderAgentBody(document.getElementById('rev-body'), buckets['code-review'], activeRevAgent?.html_url);
+      renderAgentBody(document.getElementById('tst-body'), buckets['in-test'],     activeTestRun?.html_url);
 
       const queueDef = [
         { key:'in-progress', cls:'lbl-in-progress' },
