@@ -271,6 +271,46 @@ if [ "${open_count:-99}" -lt "$BACKLOG_THRESHOLD" ]; then
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
+# STEP 2b — Re-trigger code reviews that are stuck (no active review agent)
+# Covers the review-retry case: the dev agent fixed revisions but the
+# "Trigger code review" step in claude-code.yml skips PRs with review-retry-*.
+# ══════════════════════════════════════════════════════════════════════════════
+code_review_issues=$(gh issue list \
+  --repo "$ORCHESTRATOR_REPO" \
+  --label code-review --state open \
+  --json number,labels \
+  --limit 20 \
+  2>/dev/null || echo "[]")
+
+echo "$code_review_issues" | jq -c '.[]' | while read -r cr_issue; do
+  cr_number=$(echo "$cr_issue" | jq -r '.number')
+  cr_repo=$(echo "$cr_issue" | jq -r '[.labels[].name | select(startswith("repo:"))] | first // empty' | sed 's/repo://')
+  [ -z "$cr_repo" ] && continue
+
+  active_review=$(GH_TOKEN="$DISPATCH_TOKEN" gh run list \
+    --repo "${owner}/${cr_repo}" \
+    --workflow=code-review.yml \
+    --status in_progress \
+    --json status --jq 'length' 2>/dev/null || echo "0")
+  [ "${active_review:-0}" -gt 0 ] && continue
+
+  pr_data=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
+    --repo "${owner}/${cr_repo}" --state open \
+    --json number,headRefName,body \
+    --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${cr_number}\"))] | .[0] // empty" \
+    2>/dev/null || echo "")
+  [ -z "$pr_data" ] || [ "$pr_data" = "null" ] && continue
+
+  pr_number=$(echo "$pr_data" | jq -r '.number')
+  head_branch=$(echo "$pr_data" | jq -r '.headRefName')
+  GH_TOKEN="$DISPATCH_TOKEN" gh workflow run code-review.yml \
+    --repo "${owner}/${cr_repo}" --ref main \
+    -f pr_number="$pr_number" \
+    -f head_branch="$head_branch"
+  echo "Re-triggered code review for issue #$cr_number (${cr_repo} PR #$pr_number)"
+done
+
+# ══════════════════════════════════════════════════════════════════════════════
 # STEP 3 — Dispatch next ready task
 # Dev slot (in-progress only) — code-review runs in parallel on its own agent.
 # Test slot (in-test) is independent: a test running does NOT block dispatch.
