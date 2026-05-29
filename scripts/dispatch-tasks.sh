@@ -251,10 +251,10 @@ open_count=$(gh issue list \
   --repo "$ORCHESTRATOR_REPO" \
   --state open \
   --json number,labels \
-  --jq '[.[] | select(.labels | map(.name) | any(. == "ready" or . == "in-progress" or . == "in-test"))] | length' \
+  --jq '[.[] | select(.labels | map(.name) | any(. == "ready"))] | length' \
   2>/dev/null || echo "99")
 
-echo "Open issues (ready + in-progress + in-test): $open_count"
+echo "Ready issues: $open_count (threshold: $BACKLOG_THRESHOLD)"
 
 if [ "${open_count:-99}" -lt "$BACKLOG_THRESHOLD" ]; then
   backlog_running=$(GH_TOKEN="$DISPATCH_TOKEN" gh run list \
