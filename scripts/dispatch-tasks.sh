@@ -122,10 +122,8 @@ done
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 1 — Recover stale in-progress issues
 # ══════════════════════════════════════════════════════════════════════════════
-if [ "$TRIGGER_EVENT" = "issues" ]; then
-  echo "Triggered by label event — skipping stale recovery."
-else
-  echo "Checking for stale in-progress issues..."
+echo "Checking for stale in-progress issues..."
+if true; then
 
 stale_issues=$(gh issue list \
   --repo "$ORCHESTRATOR_REPO" \
