@@ -157,6 +157,26 @@ while IFS= read -r issue; do
     continue
   fi
 
+  # Check immediately for open PRs with "Merge blocked" — don't wait for stale threshold
+  open_pr=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
+    --repo "${owner}/${target_repo}" --state open \
+    --json number,body \
+    --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${number}\"))] | .[0]" \
+    2>/dev/null || echo "")
+  if [ -n "$open_pr" ] && [ "$open_pr" != "null" ]; then
+    open_pr_number=$(echo "$open_pr" | jq -r '.number // empty' 2>/dev/null || true)
+    last_comment=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr view "$open_pr_number" \
+      --repo "${owner}/${target_repo}" --json comments \
+      --jq '.comments[-1].body[:60]' 2>/dev/null || echo "")
+    if echo "$last_comment" | grep -q "Merge blocked"; then
+      # Review passed but merge conflict — move to code-review for Guard 2b to rebase
+      gh issue edit "$number" --repo "$ORCHESTRATOR_REPO" \
+        --remove-label in-progress --add-label code-review 2>/dev/null || true
+      echo "Issue #$number: PR #$open_pr_number has merge conflict -- moved to code-review for rebase"
+      continue
+    fi
+  fi
+
   age=$(( $(date +%s) - $(date -d "$updated_at" +%s) ))
   active_runs=$(GH_TOKEN="$DISPATCH_TOKEN" gh run list \
     --repo "${owner}/${target_repo}" \
@@ -175,24 +195,7 @@ while IFS= read -r issue; do
 
   echo "Issue #$number ('$title') stale for $((age/60))m - checking recovery..."
 
-  # If an open PR exists, handle based on its state instead of silently skipping
-  open_pr=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
-    --repo "${owner}/${target_repo}" --state open \
-    --json number,body \
-    --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${number}\"))] | .[0]" \
-    2>/dev/null || echo "")
   if [ -n "$open_pr" ] && [ "$open_pr" != "null" ]; then
-    open_pr_number=$(echo "$open_pr" | jq -r '.number // empty' 2>/dev/null || true)
-    last_comment=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr view "$open_pr_number" \
-      --repo "${owner}/${target_repo}" --json comments \
-      --jq '.comments[-1].body[:60]' 2>/dev/null || echo "")
-    if echo "$last_comment" | grep -q "Merge blocked"; then
-      # Review passed but merge conflict — move to code-review for Guard 2b to rebase
-      gh issue edit "$number" --repo "$ORCHESTRATOR_REPO" \
-        --remove-label in-progress --add-label code-review 2>/dev/null || true
-      echo "Issue #$number: PR #$open_pr_number has merge conflict -- moved to code-review for rebase"
-      continue
-    fi
     echo "Issue #$number: open PR #$open_pr_number needs revision -- dispatching agent"
   fi
 
