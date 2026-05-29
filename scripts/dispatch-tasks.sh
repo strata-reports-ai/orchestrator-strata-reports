@@ -190,12 +190,10 @@ while IFS= read -r issue; do
       # Review passed but merge conflict — move to code-review for Guard 2b to rebase
       gh issue edit "$number" --repo "$ORCHESTRATOR_REPO" \
         --remove-label in-progress --add-label code-review 2>/dev/null || true
-      echo "Issue #$number: PR #$open_pr_number has merge conflict — moved to code-review for rebase"
+      echo "Issue #$number: PR #$open_pr_number has merge conflict -- moved to code-review for rebase"
       continue
     fi
-    echo "Issue #$number: open PR #$open_pr_number needs revision — dispatching agent"
-  fi
-
+    echo "Issue #$number: open PR #$open_pr_number needs revision -- dispatching agent"
   fi
 
   retry_count=$(echo "$issue" | jq -r '[.labels[].name | select(startswith("retry-"))] | length')
@@ -231,7 +229,7 @@ ${body}
 CONTEXT: A previous agent started this task but did not finish. Branch ${branch} exists with partial work.
 
 Resume instructions:
-1. Check out branch ${branch} — do NOT create a new branch.
+1. Check out branch ${branch} -- do NOT create a new branch.
 2. Run: git log origin/main..HEAD --oneline   to see what was committed.
 3. Run: ${build_cmd}   to check current build state.
 4. Check for an existing open PR: gh pr list --repo ${owner}/${target_repo} --state open --json number,body --jq "[.[] | select(.body | contains(\"${ORCHESTRATOR_REPO}#${number}\"))] | .[0]"
