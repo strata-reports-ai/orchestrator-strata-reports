@@ -272,6 +272,8 @@ fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 3 — Dispatch next ready task
+# Dev slot (in-progress only) — code-review runs in parallel on its own agent.
+# Test slot (in-test) is independent: a test running does NOT block dispatch.
 # ══════════════════════════════════════════════════════════════════════════════
 echo "Checking pipeline state..."
 
@@ -338,8 +340,8 @@ if [ "$in_test_count" -gt 0 ]; then
     else
       test_active=0
     fi
-    in_test_threshold=$([ "${test_active:-0}" -eq 0 ] && echo 5400 || echo "$STALE_THRESHOLD_SECONDS")
-    if [ "$age" -gt "$in_test_threshold" ]; then
+    # Fire immediately if no test is running; only require stale check if one is already active
+    if [ "${test_active:-0}" -eq 0 ] || [ "$age" -gt "$STALE_THRESHOLD_SECONDS" ]; then
       if [ -n "$target_repo_raw" ]; then
         pr=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
           --repo "${owner}/${target_repo_raw}" --state merged \
