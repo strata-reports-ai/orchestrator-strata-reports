@@ -175,9 +175,27 @@ while IFS= read -r issue; do
 
   echo "Issue #$number ('$title') stale for $((age/60))m - checking recovery..."
 
-  if pr_exists_for_issue "$target_repo" "$number"; then
-    echo "Issue #$number has an open PR - skipping"
-    continue
+  # If an open PR exists, handle based on its state instead of silently skipping
+  open_pr=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
+    --repo "${owner}/${target_repo}" --state open \
+    --json number,body \
+    --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${number}\"))] | .[0]" \
+    2>/dev/null || echo "")
+  if [ -n "$open_pr" ] && [ "$open_pr" != "null" ]; then
+    open_pr_number=$(echo "$open_pr" | jq -r '.number // empty' 2>/dev/null || true)
+    last_comment=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr view "$open_pr_number" \
+      --repo "${owner}/${target_repo}" --json comments \
+      --jq '.comments[-1].body[:60]' 2>/dev/null || echo "")
+    if echo "$last_comment" | grep -q "Merge blocked"; then
+      # Review passed but merge conflict — move to code-review for Guard 2b to rebase
+      gh issue edit "$number" --repo "$ORCHESTRATOR_REPO" \
+        --remove-label in-progress --add-label code-review 2>/dev/null || true
+      echo "Issue #$number: PR #$open_pr_number has merge conflict — moved to code-review for rebase"
+      continue
+    fi
+    echo "Issue #$number: open PR #$open_pr_number needs revision — dispatching agent"
+  fi
+
   fi
 
   retry_count=$(echo "$issue" | jq -r '[.labels[].name | select(startswith("retry-"))] | length')
@@ -216,10 +234,11 @@ Resume instructions:
 1. Check out branch ${branch} — do NOT create a new branch.
 2. Run: git log origin/main..HEAD --oneline   to see what was committed.
 3. Run: ${build_cmd}   to check current build state.
-4. Review acceptance criteria and complete any remaining items.
-5. Run the build command again to verify.
-6. Open a pull request targeting the main branch.
-7. PR title: ${title}. PR body must include: Implements ${ORCHESTRATOR_REPO}#${number}
+4. Check for an existing open PR: gh pr list --repo ${owner}/${target_repo} --state open --json number,body --jq "[.[] | select(.body | contains(\"${ORCHESTRATOR_REPO}#${number}\"))] | .[0]"
+5. If an open PR exists with review comments: address all findings and push to branch ${branch} (do NOT open a new PR). After pushing, re-trigger review: GH_TOKEN="\$GH_DISPATCH_TOKEN" gh workflow run code-review.yml --repo ${owner}/${target_repo} --field pr_number=[PR_NUMBER] --field head_branch=${branch}
+6. If an open PR exists but needs rebase: git merge origin/main, resolve conflicts, push.
+7. If no open PR: complete remaining acceptance criteria, then open a PR targeting main.
+   PR title: ${title}. PR body must include: Implements ${ORCHESTRATOR_REPO}#${number}
 PROMPT
 
     jq -n --arg prompt "$prompt" --arg branch "$branch" \
