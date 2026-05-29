@@ -337,10 +337,38 @@ in_test_issues=$(gh issue list \
 in_test_count=$(echo "$in_test_issues" | jq length)
 
 linked_bugs=""
-retest_prs=""
-retest_issues=""
-retest_repo=""
 
+# ── Auto-close story issues where all linked bugs are resolved ────────────────
+if [ "$in_test_count" -gt 0 ]; then
+  echo "$in_test_issues" | jq -c '.[]' | while read -r in_test_entry; do
+    in_test_number=$(echo "$in_test_entry" | jq -r '.number')
+    is_bug=$(echo "$in_test_entry" | jq -r '[.labels[].name] | any(. == "bug")')
+    [ "$is_bug" = "true" ] && continue  # bugs are closed by the test agent directly
+
+    all_bugs=$(gh issue list \
+      --repo "$ORCHESTRATOR_REPO" --label bug --state all --limit 50 \
+      --json body \
+      --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${in_test_number}\"))] | length" \
+      2>/dev/null || echo "0")
+    [ "${all_bugs:-0}" -eq 0 ] && continue  # never been tested yet — let test agent run first
+
+    open_bugs=$(gh issue list \
+      --repo "$ORCHESTRATOR_REPO" --label bug --state open --limit 50 \
+      --json body \
+      --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${in_test_number}\"))] | length" \
+      2>/dev/null || echo "1")
+
+    if [ "${open_bugs:-1}" -eq 0 ]; then
+      gh issue edit "$in_test_number" --repo "$ORCHESTRATOR_REPO" \
+        --remove-label in-test --add-label done 2>/dev/null || true
+      echo "Story #$in_test_number: all $all_bugs bug(s) resolved — marking done"
+    else
+      echo "Story #$in_test_number: $open_bugs/$all_bugs bug(s) still open"
+    fi
+  done
+fi
+
+# ── Dispatch one test per cycle (bugs first, then untested stories) ───────────
 if [ "$in_test_count" -gt 0 ]; then
   while IFS= read -r in_test_entry; do
     in_test_number=$(echo "$in_test_entry" | jq -r '.number')
@@ -357,6 +385,20 @@ if [ "$in_test_count" -gt 0 ]; then
     if [ "$cnt" -gt 0 ]; then
       linked_bugs="$linked"
       break
+    fi
+
+    # Skip if this issue has already been tested (bugs were filed) — auto-close loop handles it
+    is_bug=$(echo "$in_test_entry" | jq -r '[.labels[].name] | any(. == "bug")')
+    if [ "$is_bug" = "false" ]; then
+      all_bugs=$(gh issue list \
+        --repo "$ORCHESTRATOR_REPO" --label bug --state all --limit 50 \
+        --json body \
+        --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${in_test_number}\"))] | length" \
+        2>/dev/null || echo "0")
+      if [ "${all_bugs:-0}" -gt 0 ]; then
+        echo "Story #$in_test_number: previously tested ($all_bugs bug(s) filed) — skipping re-test"
+        continue
+      fi
     fi
 
     # Only count bugs that are not yet in-test — in-test bugs are already being handled
@@ -395,27 +437,17 @@ if [ "$in_test_count" -gt 0 ]; then
           --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${in_test_number}\"))] | .[0].number // empty" \
           2>/dev/null || true)
         if [ -n "$pr" ] && [ "$pr" != "null" ]; then
-          if [ -z "$retest_prs" ]; then
-            retest_prs="$pr"
-            retest_issues="$in_test_number"
-            retest_repo="$target_repo_raw"
-          else
-            retest_prs="${retest_prs},${pr}"
-            retest_issues="${retest_issues},${in_test_number}"
-          fi
+          GH_TOKEN="$DISPATCH_TOKEN" gh workflow run test-agent.yml \
+            --repo "${owner}/fn-strata-reports" --ref main \
+            -f pr_numbers="$pr" \
+            -f target_repo="$target_repo_raw" \
+            -f orchestrator_issues="$in_test_number"
+          echo "Dispatched test for issue #$in_test_number (PR #$pr in $target_repo_raw)"
+          break  # one test per orchestrator cycle
         fi
       fi
     fi
   done < <(echo "$in_test_issues" | jq -c '.[]')
-fi
-
-if [ -n "$retest_prs" ]; then
-  GH_TOKEN="$DISPATCH_TOKEN" gh workflow run test-agent.yml \
-    --repo "${owner}/fn-strata-reports" --ref main \
-    -f pr_numbers="$retest_prs" \
-    -f target_repo="$retest_repo" \
-    -f orchestrator_issues="$retest_issues"
-  echo "Dispatched batched test re-trigger for issues $retest_issues"
 fi
 
 # Per-repo slots: each repo (fn, dbproj, web) can run one dev agent concurrently.
