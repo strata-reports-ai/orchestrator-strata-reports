@@ -321,12 +321,16 @@ if [ "$in_test_count" -gt 0 ]; then
       break
     fi
 
+    # Only count bugs that are not yet in-test — in-test bugs are already being handled
     open_linked_bug_cnt=$(gh issue list \
       --repo "$ORCHESTRATOR_REPO" \
       --label bug --state open \
-      --json number,body \
+      --json number,body,labels \
       --limit 20 \
-      --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${in_test_number}\"))] | length" \
+      --jq "[.[] | select(
+        (.body | contains(\"orchestrator-strata-reports#${in_test_number}\")) and
+        (.labels | map(.name) | any(. == \"in-test\") | not)
+      )] | length" \
       2>/dev/null || echo "0")
     if [ "${open_linked_bug_cnt:-0}" -gt 0 ]; then
       continue
@@ -367,7 +371,7 @@ if [ "$in_test_count" -gt 0 ]; then
   done < <(echo "$in_test_issues" | jq -c '.[]')
 fi
 
-if [ -n "$retest_prs" ] && [ -z "$linked_bugs" ]; then
+if [ -n "$retest_prs" ]; then
   GH_TOKEN="$DISPATCH_TOKEN" gh workflow run test-agent.yml \
     --repo "${owner}/fn-strata-reports" --ref main \
     -f pr_numbers="$retest_prs" \
