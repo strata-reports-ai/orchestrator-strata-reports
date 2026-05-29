@@ -392,8 +392,15 @@ if [ "$in_test_count" -gt 0 ]; then
   done
 fi
 
-# ── Dispatch one test per cycle (bugs first, then untested stories) ───────────
+# ── Dispatch up to one test per repo per cycle ────────────────────────────────
 if [ "$in_test_count" -gt 0 ]; then
+  total_test_active=$(GH_TOKEN="$DISPATCH_TOKEN" gh run list \
+    --repo "${owner}/fn-strata-reports" \
+    --workflow=test-agent.yml \
+    --status in_progress \
+    --json status --jq 'length' 2>/dev/null || echo "0")
+  dispatched_repos=""
+
   while IFS= read -r in_test_entry; do
     in_test_number=$(echo "$in_test_entry" | jq -r '.number')
 
@@ -440,36 +447,37 @@ if [ "$in_test_count" -gt 0 ]; then
       continue
     fi
 
+    target_repo_raw=$(echo "$in_test_entry" | jq -r '[.labels[].name | select(startswith("repo:"))] | first // empty' | sed 's/repo://')
+    [ -z "$target_repo_raw" ] && continue
+
+    # One test per target repo per cycle
+    if echo "$dispatched_repos" | grep -qF "$target_repo_raw"; then
+      continue
+    fi
+
     updated_at=$(echo "$in_test_entry" | jq -r '.updatedAt')
     age=$(( $(date +%s) - $(date -d "$updated_at" +%s) ))
-    target_repo_raw=$(echo "$in_test_entry" | jq -r '[.labels[].name | select(startswith("repo:"))] | first // empty' | sed 's/repo://')
-    if [ -n "$target_repo_raw" ]; then
-      test_active=$(GH_TOKEN="$DISPATCH_TOKEN" gh run list \
-        --repo "${owner}/fn-strata-reports" \
-        --workflow=test-agent.yml \
-        --status in_progress \
-        --json status --jq 'length' 2>/dev/null || echo "0")
-    else
-      test_active=0
+
+    # Skip if at concurrent cap and issue is not stale
+    if [ "${total_test_active:-0}" -ge 3 ] && [ "$age" -le "$STALE_THRESHOLD_SECONDS" ]; then
+      echo "Issue #$in_test_number: test capacity full ($total_test_active active) — skipping"
+      continue
     fi
-    # Fire immediately if no test is running; only require stale check if one is already active
-    if [ "${test_active:-0}" -eq 0 ] || [ "$age" -gt "$STALE_THRESHOLD_SECONDS" ]; then
-      if [ -n "$target_repo_raw" ]; then
-        pr=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
-          --repo "${owner}/${target_repo_raw}" --state merged \
-          --json number,body \
-          --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${in_test_number}\"))] | .[0].number // empty" \
-          2>/dev/null || true)
-        if [ -n "$pr" ] && [ "$pr" != "null" ]; then
-          GH_TOKEN="$DISPATCH_TOKEN" gh workflow run test-agent.yml \
-            --repo "${owner}/fn-strata-reports" --ref main \
-            -f pr_numbers="$pr" \
-            -f target_repo="$target_repo_raw" \
-            -f orchestrator_issues="$in_test_number"
-          echo "Dispatched test for issue #$in_test_number (PR #$pr in $target_repo_raw)"
-          break  # one test per orchestrator cycle
-        fi
-      fi
+
+    pr=$(GH_TOKEN="$DISPATCH_TOKEN" gh pr list \
+      --repo "${owner}/${target_repo_raw}" --state merged \
+      --json number,body \
+      --jq "[.[] | select(.body | contains(\"orchestrator-strata-reports#${in_test_number}\"))] | .[0].number // empty" \
+      2>/dev/null || true)
+    if [ -n "$pr" ] && [ "$pr" != "null" ]; then
+      GH_TOKEN="$DISPATCH_TOKEN" gh workflow run test-agent.yml \
+        --repo "${owner}/fn-strata-reports" --ref main \
+        -f pr_numbers="$pr" \
+        -f target_repo="$target_repo_raw" \
+        -f orchestrator_issues="$in_test_number"
+      echo "Dispatched test for issue #$in_test_number (PR #$pr in $target_repo_raw)"
+      dispatched_repos="$dispatched_repos $target_repo_raw"
+      total_test_active=$((total_test_active + 1))
     fi
   done < <(echo "$in_test_issues" | jq -c '.[]')
 fi
