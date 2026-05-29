@@ -279,7 +279,7 @@
 
     try {
       const DB = 'strata-reports-ai/dbproj-strata-reports';
-      const [issues, devFn, devDb, devWeb, testRuns, revFn, revDb] = await Promise.all([
+      const settled = await Promise.allSettled([
         get(`${GH}/repos/${ORCH}/issues?state=open&per_page=100`),
         get(`${GH}/repos/${FN}/actions/workflows/claude-code.yml/runs?per_page=5`),
         get(`${GH}/repos/${DB}/actions/workflows/claude-code.yml/runs?per_page=5`),
@@ -288,6 +288,13 @@
         get(`${GH}/repos/${FN}/actions/workflows/code-review.yml/runs?per_page=5`),
         get(`${GH}/repos/${DB}/actions/workflows/code-review.yml/runs?per_page=5`),
       ]);
+      const ok = (i, fb) => settled[i].status === 'fulfilled' ? settled[i].value : fb;
+      const issues = ok(0, []);
+      const devFn  = ok(1, {}); const devDb = ok(2, {}); const devWeb = ok(3, {});
+      const testRuns = ok(4, {});
+      const revFn  = ok(5, {}); const revDb = ok(6, {});
+      const failed = settled.filter(s => s.status === 'rejected').map(s => s.reason?.message || 'unknown');
+      if (failed.length) console.warn('Dashboard: some fetches failed:', failed);
 
       const buckets = { 'in-progress':[], 'code-review':[], 'in-test':[], 'cap-wait':[], 'ready':[], 'other':[] };
       const ORDER = ['in-progress','code-review','in-test','cap-wait','ready'];
