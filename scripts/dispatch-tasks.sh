@@ -277,12 +277,16 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 echo "Checking pipeline state..."
 
-dev_active_count=$(gh issue list \
+# Per-repo dev slots: collect which repos already have an in-progress issue
+occupied_repos=$(gh issue list \
   --repo "$ORCHESTRATOR_REPO" \
   --state open \
   --json labels \
-  --jq '[.[] | select(.labels | map(.name) | any(. == "in-progress"))] | length' \
-  2>/dev/null || echo "0")
+  --jq '[.[] | select(.labels | map(.name) | any(. == "in-progress"))
+        | .labels[] | select(.name | startswith("repo:")) | .name | ltrimstr("repo:")] | unique' \
+  2>/dev/null || echo "[]")
+dev_active_count=$(echo "$occupied_repos" | jq length 2>/dev/null || echo "0")
+echo "Occupied repos: $(echo "$occupied_repos" | jq -r 'join(", ")' 2>/dev/null || echo "none")"
 
 in_test_issues=$(gh issue list \
   --repo "$ORCHESTRATOR_REPO" \
@@ -372,41 +376,33 @@ if [ -n "$retest_prs" ] && [ -z "$linked_bugs" ]; then
   echo "Dispatched batched test re-trigger for issues $retest_issues"
 fi
 
-if [ "${dev_active_count:-0}" -gt 0 ]; then
-  echo "Dev slot occupied ($dev_active_count in-progress) — only linked bugs eligible"
-  if [ -n "$linked_bugs" ]; then
-    issues="$linked_bugs"
-  else
-    echo "No linked bugs — waiting for dev slot to clear."
-    exit 0
-  fi
+# Per-repo slots: each repo (fn, dbproj, web) can run one dev agent concurrently.
+# Build the full candidate pool (linked bugs take priority, then ready + failed),
+# and let the dispatch loop skip any issue whose repo is already occupied.
+if [ -n "$linked_bugs" ]; then
+  issues="$linked_bugs"
 else
-  echo "Dev slot free — picking next task..."
-  if [ -n "$linked_bugs" ]; then
-    issues="$linked_bugs"
-  else
-    ready_issues=$(gh issue list \
-      --repo "$ORCHESTRATOR_REPO" \
-      --label ready --state open \
-      --json number,title,body,labels \
-      --limit 10)
+  ready_issues=$(gh issue list \
+    --repo "$ORCHESTRATOR_REPO" \
+    --label ready --state open \
+    --json number,title,body,labels \
+    --limit 10)
 
-    failed_issues=$(gh issue list \
-      --repo "$ORCHESTRATOR_REPO" \
-      --label agent-failed --state open \
-      --json number,title,body,labels \
-      --limit 10)
+  failed_issues=$(gh issue list \
+    --repo "$ORCHESTRATOR_REPO" \
+    --label agent-failed --state open \
+    --json number,title,body,labels \
+    --limit 10)
 
-    issues=$(jq -s '
-      (.[0] + .[1]) | unique_by(.number) |
-      sort_by(
-        if (.labels | map(.name) | any(. == "priority:high")) then 0
-        elif (.labels | map(.name) | any(. == "agent-failed")) then 1
-        else 2
-        end
-      )
-    ' <(echo "$ready_issues") <(echo "$failed_issues"))
-  fi
+  issues=$(jq -s '
+    (.[0] + .[1]) | unique_by(.number) |
+    sort_by(
+      if (.labels | map(.name) | any(. == "priority:high")) then 0
+      elif (.labels | map(.name) | any(. == "agent-failed")) then 1
+      else 2
+      end
+    )
+  ' <(echo "$ready_issues") <(echo "$failed_issues"))
 fi
 
 count=$(echo "$issues" | jq length)
@@ -420,7 +416,7 @@ fi
 dispatched=0
 
 echo "$issues" | jq -c '.[]' | while read -r issue; do
-  if [ "$dispatched" -ge 1 ]; then
+  if [ "$dispatched" -ge 3 ]; then
     break
   fi
 
@@ -435,6 +431,12 @@ echo "$issues" | jq -c '.[]' | while read -r issue; do
 
   if [ -z "$target_repo" ]; then
     echo "Issue #$number has no repo: label - skipping"
+    continue
+  fi
+
+  # Skip if this repo already has an in-progress issue (per-repo dev slot)
+  if echo "$occupied_repos" | jq -e --arg r "$target_repo" 'index($r) != null' >/dev/null 2>&1; then
+    echo "Issue #$number: $target_repo slot occupied — skipping"
     continue
   fi
 
