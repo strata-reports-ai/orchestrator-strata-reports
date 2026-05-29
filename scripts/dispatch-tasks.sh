@@ -257,7 +257,7 @@ PROMPT
     [ "$stale_dispatched" -ge 1 ] && break
   else
     gh issue edit "$number" --repo "$ORCHESTRATOR_REPO" \
-      --remove-label in-progress --add-label ready --add-label "retry-$next_retry"
+      --remove-label in-progress --remove-label in-test --add-label ready --add-label "retry-$next_retry"
     gh issue comment "$number" --repo "$ORCHESTRATOR_REPO" \
       --body "Previous agent failed before creating a branch (retry $next_retry/3). Resetting to **ready**."
   fi
