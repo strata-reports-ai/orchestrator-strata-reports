@@ -355,7 +355,7 @@ in_test_issues=$(gh issue list \
   --label in-test \
   --state open \
   --json number,labels,updatedAt \
-  --limit 20 \
+  --limit 60 \
   2>/dev/null || echo "[]")
 
 in_test_count=$(echo "$in_test_issues" | jq length)
