@@ -414,8 +414,8 @@ if [ "$in_test_count" -gt 0 ]; then
 
     cnt=$(echo "$linked" | jq length)
     if [ "$cnt" -gt 0 ]; then
-      linked_bugs="$linked"
-      break
+      [ -z "$linked_bugs" ] && linked_bugs="$linked"
+      continue
     fi
 
     # Skip if this issue has already been tested (bugs were filed) — auto-close loop handles it
